@@ -4,7 +4,28 @@ from itertools import islice # slicing for iterators
  
 def word_matches(h, ref):
     return sum(1 for w in h if w in ref)
+
+def func_words(h, ref):
+    func = ['the','a','an']
+    func += ['to','in','on']
+    h_func = sum(1 for w in h if w in func)
+    ref_func = sum(1 for w in ref if w in func)
+    return abs( float(h_func)-float(ref_func) ) / float(len(ref))
+
+def punc_words(h, ref):
+    punc = ['.','!','?','"','\'',',',':','$','%','(',')','`']
+    h_punc = sum(1 for w in h if w in punc)
+    ref_punc = sum(1 for w in ref if w in punc)
+    return  abs( float(h_punc)-float(ref_punc) ) / float(len(ref))
  
+def content_words(h, ref):
+    func = ['the','a','an']
+    func += ['to','in','on']
+    punc = ['.','!','?','"','\'',',',':','$','%','(',')','`']
+    h_content = sum(1 for w in h if w not in func and w not in punc)
+    ref_content = sum(1 for w in ref if w not in func and w not in punc)
+    return abs( float(h_content)-float(ref_content) ) / float(len(ref))
+
 def main():
     parser = argparse.ArgumentParser(description='Evaluate translation hypotheses.')
     parser.add_argument('-i', '--input', default='data/hyp1-hyp2-ref',
@@ -39,12 +60,16 @@ def main():
           h2_score = 0
         else :
           h2_score = (h2_prec*h2_rec)/( (1-opts.alpha)*h2_rec + opts.alpha*h2_prec )
-        #print("h1 precision: " + str(h1_prec))
-        #print("h1 recall: " + str(h1_rec))
-        #print("h1 score: " + str(h1_score))
-        #print("h2 precision: " + str(h2_prec))
-        #print("h2 recall: " + str(h2_rec))
-        #print("h2 score: " + str(h2_score))
+          
+        
+
+
+        #h1_score = h1_score - func_words(h1,ref)
+        #h2_score = h2_score - func_words(h2,ref)
+        #h1_score = h1_score - punc_words(h1,ref)
+        #h2_score = h2_score - punc_words(h2,ref)
+        #h1_score = h1_score - content_words(h1,ref)
+        #h2_score = h2_score - content_words(h2,ref)        
         print(1 if h1_score > h2_score else # \begin{cases}
                 (0 if h1_score == h2_score
                     else -1)) # \end{cases}
