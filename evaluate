@@ -1,30 +1,34 @@
 #!/usr/bin/env python
 import argparse # optparse is deprecated
 from itertools import islice # slicing for iterators
- 
+import optparse
+import sys
+import models
+import math
+
 def word_matches(h, ref):
     return sum(1 for w in h if w in ref)
 
-def func_words(h, ref):
+def func_words(h, ref, sc):
     func = ['the','a','an']
     func += ['to','in','on']
     h_func = sum(1 for w in h if w in func)
     ref_func = sum(1 for w in ref if w in func)
-    return abs( float(h_func)-float(ref_func) ) / float(len(ref))
+    return abs( float(h_func)-float(ref_func) ) / float(len(ref)) / sc 
 
-def punc_words(h, ref):
+def punc_words(h, ref, sc):
     punc = ['.','!','?','"','\'',',',':','$','%','(',')','`']
     h_punc = sum(1 for w in h if w in punc)
     ref_punc = sum(1 for w in ref if w in punc)
-    return  abs( float(h_punc)-float(ref_punc) ) / float(len(ref))
+    return  abs( float(h_punc)-float(ref_punc) ) / float(len(ref)) / sc
  
-def content_words(h, ref):
+def content_words(h, ref, sc):
     func = ['the','a','an']
     func += ['to','in','on']
     punc = ['.','!','?','"','\'',',',':','$','%','(',')','`']
     h_content = sum(1 for w in h if w not in func and w not in punc)
     ref_content = sum(1 for w in ref if w not in func and w not in punc)
-    return abs( float(h_content)-float(ref_content) ) / float(len(ref))
+    return abs( float(h_content)-float(ref_content) ) / float(len(ref)) / sc
 
 def main():
     parser = argparse.ArgumentParser(description='Evaluate translation hypotheses.')
@@ -34,9 +38,14 @@ def main():
             help='Number of hypothesis pairs to evaluate')
     parser.add_argument('-a', '--alpha', default=0.5, type=float,
             help='Alpha parameter to tune')
+    parser.add_argument("-l", "--language-model", dest="lm", default="data/lm", help="File containing ARPA-format language model (default=data/lm)")
+    parser.add_argument("-s", "--scale", dest="sc", default="10", help="Scale down of normalized LM score difference")   
     # note that if x == [1, 2, 3], then x[:None] == x[:] == x (copy); no need for sys.maxint
     opts = parser.parse_args()
  
+    lm = models.LM(opts.lm)
+    scale = float(opts.sc)    
+
     # we create a generator and avoid loading all sentences into a list
     def sentences():
         with open(opts.input) as f:
@@ -60,19 +69,52 @@ def main():
           h2_score = 0
         else :
           h2_score = (h2_prec*h2_rec)/( (1-opts.alpha)*h2_rec + opts.alpha*h2_prec )
-          
-        
-
-
-        #h1_score = h1_score - func_words(h1,ref)
-        #h2_score = h2_score - func_words(h2,ref)
-        #h1_score = h1_score - punc_words(h1,ref)
-        #h2_score = h2_score - punc_words(h2,ref)
-        #h1_score = h1_score - content_words(h1,ref)
-        #h2_score = h2_score - content_words(h2,ref)        
-        print(1 if h1_score > h2_score else # \begin{cases}
-                (0 if h1_score == h2_score
-                    else -1)) # \end{cases}
+        # Compute Language Model Score
+        h1_lm_state = lm.begin()
+        h1_lm_logprob = 0.0
+        for word in tuple(h1) + ("</s>",):
+          (h1_lm_state,word_logprob) = lm.score(h1_lm_state,word)
+          h1_lm_logprob += word_logprob
+        #print("TOTAL LM LOGPROB: %f\n" % h1_lm_logprob,0)
+        h2_lm_state = lm.begin()
+        h2_lm_logprob = 0.0
+        for word in tuple(h2) + ("</s>",):
+          (h2_lm_state,word_logprob) = lm.score(h2_lm_state,word)
+          h2_lm_logprob += word_logprob
+        #print("TOTAL LM LOGPROB: %f\n" % h2_lm_logprob,0)
+        ref_lm_state = lm.begin()
+        ref_lm_logprob = 0.0
+        for word in tuple(ref) + ("</s>",):
+          (ref_lm_state,word_logprob) = lm.score(ref_lm_state,word)
+          ref_lm_logprob += word_logprob
+        #print("TOTAL LM LOGPROB: %f\n" % ref_lm_logprob,0)
+        h1_lm_logprob = h1_lm_logprob/float(len(h1))
+        h2_lm_logprob = h2_lm_logprob/float(len(h2))
+        if h1_lm_logprob > h2_lm_logprob:
+          h2_lm_logprob = h1_lm_logprob - h2_lm_logprob
+          h1_lm_logprob = 0.0
+        else:
+          h1_lm_logprob = h2_lm_logprob - h1_lm_logprob
+          h2_lm_logprob = 0.0 
+        h1_lm_logprob = h1_lm_logprob/ref_lm_logprob
+        h2_lm_logprob = h2_lm_logprob/ref_lm_logprob
+        h1_lm_logprob = h1_lm_logprob/scale
+        h2_lm_logprob = h2_lm_logprob/scale
+        #h1_score = h1_score - func_words(h1,ref,scale*1000.0)
+        #h2_score = h2_score - func_words(h2,ref,scale*1000.0)
+        h1_score = h1_score - punc_words(h1,ref,6.0/2.5)
+        h2_score = h2_score - punc_words(h2,ref,6.0/2.5)
+        h1_score = h1_score - content_words(h1,ref,6.0/2.5)
+        h2_score = h2_score - content_words(h2,ref,6.0/2.5)        
+        #print("Score 1: %f\n" % h1_score,0)
+        #print("LM_Score 1: %f\n" % h1_lm_logprob,0)
+        #print("Score 2: %f\n" % h2_score,0)
+        #print("LM_Score 2: %f\n" % h2_lm_logprob,0)
+        h1_score += (1.0)*h1_lm_logprob
+        h2_score += (1.0)*h2_lm_logprob
+        print(1 if h1_score - h2_score > 0.00000000001 else # \begin{cases}
+                (-1 if h1_score - h2_score < -0.0000000001 or scale > 0
+                    else 0)) # \end{cases}
  
 # convention to allow import of this file as a module
 if __name__ == '__main__':
