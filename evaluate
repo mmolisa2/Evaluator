@@ -20,8 +20,7 @@ def word_matches(h, ref, syn):
     return matches
 
 def func_words(h, ref, sc):
-    func = ['the','a','an']
-    func += ['to','in','on']
+    func = ['the','a','an', 'to', 'in', 'on']
     h_func = sum(1 for w in h if w in func)
     ref_func = sum(1 for w in ref if w in func)
     return abs( float(h_func)-float(ref_func) ) / float(len(ref)) / sc 
@@ -33,8 +32,7 @@ def punc_words(h, ref, sc):
     return  abs( float(h_punc)-float(ref_punc) ) / float(len(ref)) / sc
  
 def content_words(h, ref, sc):
-    func = ['the','a','an']
-    func += ['to','in','on']
+    func = ['the','a','an', 'to', 'in', 'on']
     punc = ['.','!','?','"','\'',',',':','$','%','(',')','`']
     h_content = sum(1 for w in h if w not in func and w not in punc)
     ref_content = sum(1 for w in ref if w not in func and w not in punc)
@@ -50,10 +48,10 @@ def main():
             help='Alpha parameter to tune')
     parser.add_argument("-l", "--language-model", dest="lm", default="data/lm", help="File containing ARPA-format language model (default=data/lm)")
     parser.add_argument("-s", "--scale", dest="sc", default="10", help="Scale down of normalized LM score difference")   
-    # note that if x == [1, 2, 3], then x[:None] == x[:] == x (copy); no need for sys.maxint
     opts = parser.parse_args()
 
-    synonyms={}
+    # synonyms[word] -> list of word's synonyms
+    synonyms={} # initialize dictionary to add synonym lists
 
     with open("data/adv.exc") as adv :
         for pair in adv :
@@ -100,8 +98,8 @@ def main():
             else :
                 synonyms[words[1]] = [words[0]]
    
-    lm = models.LM(opts.lm)
-    scale = float(opts.sc)    
+    lm = models.LM(opts.lm) # create the language model
+    scale = float(opts.sc) 
 
     # we create a generator and avoid loading all sentences into a list
     def sentences():
@@ -118,11 +116,11 @@ def main():
         h2_prec = float(h2_match)/float(len(h2))
         h1_rec = float(h1_match)/float(len(ref))
         h2_rec = float(h2_match)/float(len(ref))
-        if h1_prec == 0 or h1_rec == 0 :
+        if h1_prec == 0 or h1_rec == 0 : # to avoid divide by 0 error
           h1_score = 0
         else :
           h1_score = (h1_prec*h1_rec)/( (1-opts.alpha)*h1_rec + opts.alpha*h1_prec )
-        if h2_prec == 0 or h2_rec == 0 :
+        if h2_prec == 0 or h2_rec == 0 : # to avoid divide by 0 error
           h2_score = 0
         else :
           h2_score = (h2_prec*h2_rec)/( (1-opts.alpha)*h2_rec + opts.alpha*h2_prec )
@@ -132,41 +130,46 @@ def main():
         for word in tuple(h1) + ("</s>",):
           (h1_lm_state,word_logprob) = lm.score(h1_lm_state,word)
           h1_lm_logprob += word_logprob
-        #print("TOTAL LM LOGPROB: %f\n" % h1_lm_logprob,0)
         h2_lm_state = lm.begin()
         h2_lm_logprob = 0.0
         for word in tuple(h2) + ("</s>",):
           (h2_lm_state,word_logprob) = lm.score(h2_lm_state,word)
           h2_lm_logprob += word_logprob
-        #print("TOTAL LM LOGPROB: %f\n" % h2_lm_logprob,0)
         ref_lm_state = lm.begin()
         ref_lm_logprob = 0.0
         for word in tuple(ref) + ("</s>",):
           (ref_lm_state,word_logprob) = lm.score(ref_lm_state,word)
           ref_lm_logprob += word_logprob
-        #print("TOTAL LM LOGPROB: %f\n" % ref_lm_logprob,0)
+        # normalize logprobs by sentence length
         h1_lm_logprob = h1_lm_logprob/float(len(h1))
         h2_lm_logprob = h2_lm_logprob/float(len(h2))
+        # compute differential between the 2 to be added to the worse-scoring candidate's score
         if h1_lm_logprob > h2_lm_logprob:
           h2_lm_logprob = h1_lm_logprob - h2_lm_logprob
           h1_lm_logprob = 0.0
         else:
           h1_lm_logprob = h2_lm_logprob - h1_lm_logprob
           h2_lm_logprob = 0.0 
+        # scores still too big, making too much of an impact. Need to normalize more
         h1_lm_logprob = h1_lm_logprob/ref_lm_logprob # normalize by log prob of ref sentence
         h2_lm_logprob = h2_lm_logprob/ref_lm_logprob # normalize by log prob of ref sentence
         h1_lm_logprob = h1_lm_logprob/scale # normalize by input scale
         h2_lm_logprob = h2_lm_logprob/scale # normalize by input scale
+        # Penalize candidates for differences in function words
         h1_score = h1_score - func_words(h1,ref,scale*1000.0)
         h2_score = h2_score - func_words(h2,ref,scale*1000.0)
+        # Penalize candidates for differences in punctuation
         h1_score = h1_score - punc_words(h1,ref,6.0/2.5)
         h2_score = h2_score - punc_words(h2,ref,6.0/2.5)
+        # Penalize candidates for differences in content words (not punctuation or function words)
         h1_score = h1_score - content_words(h1,ref,6.0/2.5)
         h2_score = h2_score - content_words(h2,ref,6.0/2.5)        
+        # Penalize the lower scoring sentence according to the LM
         h1_score += (1.0)*h1_lm_logprob
         h2_score += (1.0)*h2_lm_logprob
+        # Make choice of 1, -1, or 0
         print(1 if h1_score - h2_score > 0.00000000001 else # \begin{cases}
-                (-1 if h1_score - h2_score < -0.0000000001 #or scale > 0
+                (-1 if h1_score - h2_score < -0.0000000001 
                     else 0)) # \end{cases}
  
 # convention to allow import of this file as a module
