@@ -6,8 +6,18 @@ import sys
 import models
 import math
 
-def word_matches(h, ref):
-    return sum(1 for w in h if w in ref)
+def word_matches(h, ref, syn):
+    matches = 0
+    for w in h :
+        add = 0
+        if w in ref :
+            add = 1
+        elif w in syn :
+            for cand in syn[w] :
+                if cand in ref :
+                    add = 1
+        matches += add 
+    return matches
 
 def func_words(h, ref, sc):
     func = ['the','a','an']
@@ -42,7 +52,54 @@ def main():
     parser.add_argument("-s", "--scale", dest="sc", default="10", help="Scale down of normalized LM score difference")   
     # note that if x == [1, 2, 3], then x[:None] == x[:] == x (copy); no need for sys.maxint
     opts = parser.parse_args()
- 
+
+    synonyms={}
+
+    with open("data/adv.exc") as adv :
+        for pair in adv :
+            words = pair.strip().split()
+            if words[0] in synonyms :
+                synonyms[words[0]].append(words[1])
+            else :
+                synonyms[words[0]] = [words[1]]
+            if words[1] in synonyms :
+                synonyms[words[1]].append(words[0])
+            else :
+                synonyms[words[1]] = [words[0]]
+    with open("data/noun.exc") as noun :
+        for pair in noun :
+            words = pair.strip().split()
+            if words[0] in synonyms :
+                synonyms[words[0]].append(words[1])
+            else :
+                synonyms[words[0]] = [words[1]]
+            if words[1] in synonyms :
+                synonyms[words[1]].append(words[0])
+            else :
+                synonyms[words[1]] = [words[0]]
+    with open("data/verb.exc") as verb :
+        for pair in verb :
+            words = pair.strip().split()
+            if words[0] in synonyms :
+                synonyms[words[0]].append(words[1])
+            else :
+                synonyms[words[0]] = [words[1]]
+            if words[1] in synonyms :
+                synonyms[words[1]].append(words[0])
+            else :
+                synonyms[words[1]] = [words[0]]
+    with open("data/adj.exc") as adj :
+        for pair in adj :
+            words = pair.strip().split()
+            if words[0] in synonyms :
+                synonyms[words[0]].append(words[1])
+            else :
+                synonyms[words[0]] = [words[1]]
+            if words[1] in synonyms :
+                synonyms[words[1]].append(words[0])
+            else :
+                synonyms[words[1]] = [words[0]]
+   
     lm = models.LM(opts.lm)
     scale = float(opts.sc)    
 
@@ -55,8 +112,8 @@ def main():
     # note: the -n option does not work in the original code
     for h1, h2, ref in islice(sentences(), opts.num_sentences):
         rset = set(ref)
-        h1_match = word_matches(h1, rset)
-        h2_match = word_matches(h2, rset)
+        h1_match = word_matches(h1, rset, synonyms)
+        h2_match = word_matches(h2, rset, synonyms)
         h1_prec = float(h1_match)/float(len(h1))
         h2_prec = float(h2_match)/float(len(h2))
         h1_rec = float(h1_match)/float(len(ref))
@@ -96,24 +153,20 @@ def main():
         else:
           h1_lm_logprob = h2_lm_logprob - h1_lm_logprob
           h2_lm_logprob = 0.0 
-        h1_lm_logprob = h1_lm_logprob/ref_lm_logprob
-        h2_lm_logprob = h2_lm_logprob/ref_lm_logprob
-        h1_lm_logprob = h1_lm_logprob/scale
-        h2_lm_logprob = h2_lm_logprob/scale
-        #h1_score = h1_score - func_words(h1,ref,scale*1000.0)
-        #h2_score = h2_score - func_words(h2,ref,scale*1000.0)
+        h1_lm_logprob = h1_lm_logprob/ref_lm_logprob # normalize by log prob of ref sentence
+        h2_lm_logprob = h2_lm_logprob/ref_lm_logprob # normalize by log prob of ref sentence
+        h1_lm_logprob = h1_lm_logprob/scale # normalize by input scale
+        h2_lm_logprob = h2_lm_logprob/scale # normalize by input scale
+        h1_score = h1_score - func_words(h1,ref,scale*1000.0)
+        h2_score = h2_score - func_words(h2,ref,scale*1000.0)
         h1_score = h1_score - punc_words(h1,ref,6.0/2.5)
         h2_score = h2_score - punc_words(h2,ref,6.0/2.5)
         h1_score = h1_score - content_words(h1,ref,6.0/2.5)
         h2_score = h2_score - content_words(h2,ref,6.0/2.5)        
-        #print("Score 1: %f\n" % h1_score,0)
-        #print("LM_Score 1: %f\n" % h1_lm_logprob,0)
-        #print("Score 2: %f\n" % h2_score,0)
-        #print("LM_Score 2: %f\n" % h2_lm_logprob,0)
         h1_score += (1.0)*h1_lm_logprob
         h2_score += (1.0)*h2_lm_logprob
         print(1 if h1_score - h2_score > 0.00000000001 else # \begin{cases}
-                (-1 if h1_score - h2_score < -0.0000000001 or scale > 0
+                (-1 if h1_score - h2_score < -0.0000000001 #or scale > 0
                     else 0)) # \end{cases}
  
 # convention to allow import of this file as a module
